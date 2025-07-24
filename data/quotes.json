@@ -1,0 +1,27 @@
+[
+  {
+    "quote": "Life is like riding a bicycle. To keep your balance you must keep moving.",
+    "author": "Albert Einstein",
+    "tags": ["life", "balance", "inspiration"]
+  },
+  {
+    "quote": "The person, be it gentleman or lady, who has not pleasure in a good novel, must be intolerably stupid.",
+    "author": "Jane Austen",
+    "tags": ["books", "humor", "reading"]
+  },
+  {
+    "quote": "A day without sunshine is like, you know, night.",
+    "author": "Steve Martin",
+    "tags": ["humor", "funny", "life"]
+  },
+  {
+    "quote": "If you want to live a happy life, tie it to a goal, not to people or things.",
+    "author": "Albert Einstein",
+    "tags": ["life", "happiness", "goal"]
+  },
+  {
+    "quote": "I like a woman with a head on her shoulders. I hate necks.",
+    "author": "Steve Martin",
+    "tags": ["humor", "absurd", "comedy"]
+  }
+]

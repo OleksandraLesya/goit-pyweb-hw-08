@@ -1,0 +1,38 @@
+version: '3.8' # Визначаємо версію Docker Compose файлу
+
+services:
+  # Сервіс RabbitMQ
+  rabbitmq:
+    image: rabbitmq:3-management # Використовуємо офіційний образ RabbitMQ з плагіном управління
+    hostname: rabbitmq # Ім'я хоста для контейнера RabbitMQ
+    ports:
+      - "5672:5672" # Мапуємо порт AMQP (для клієнтів)
+      - "15672:15672" # Мапуємо порт для веб-інтерфейсу управління RabbitMQ
+    environment:
+      RABBITMQ_DEFAULT_USER: guest # Стандартний користувач
+      RABBITMQ_DEFAULT_PASS: guest # Стандартний пароль
+    healthcheck: # Перевірка стану сервісу
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq # Зберігаємо дані RabbitMQ у волюмі для постійності
+
+  # Сервіс Redis
+  redis:
+    image: redis:latest # Використовуємо офіційний образ Redis
+    hostname: redis # Ім'я хоста для контейнера Redis
+    ports:
+      - "6379:6379" # Мапуємо стандартний порт Redis
+    healthcheck: # Перевірка стану сервісу
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis_data:/data # Зберігаємо дані Redis у волюмі для постійності
+
+volumes:
+  rabbitmq_data: # Визначаємо волюм для даних RabbitMQ
+  redis_data:    # Визначаємо волюм для даних Redis
