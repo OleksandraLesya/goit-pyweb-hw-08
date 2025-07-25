@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Контакти</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+  <div class="container">
+    <h1>Contact List</h1>
+    <div class="filters">
+      <a href="/">All</a>
+      <a href="/filter?sent=true">Sent</a>
+      <a href="/filter?sent=false">Pending</a>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Phone</th>
+          <th>Channel</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for contact in contacts %}
+          <tr>
+            <td>{{ contact.full_name }}</td>
+            <td>{{ contact.email }}</td>
+            <td>{{ contact.phone_number }}</td>
+            <td>{{ contact.preferred_channel|upper }}</td>
+            <td class="{% if contact.is_sent %}status-sent{% else %}status-pending{% endif %}">
+              {{ 'Sent' if contact.is_sent else 'Pending' }} {# Статус англійською #}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>
