@@ -33,6 +33,3 @@ def connect_db() -> None: # Додано анотацію типу для фун
         logging.error(f"❌ Помилка підключення до MongoDB Atlas: {e}") # Використовуємо logging.error
         logging.error("Будь ласка, перевірте URI підключення та доступ до мережі.") # Використовуємо logging.error
         exit(1)
-
-# Викликаємо функцію підключення при імпорті модуля
-connect_db()

@@ -22,9 +22,15 @@ logs/
 *.sqlite3
 *.db
 
+# Scrapy output files
+data/*.json
+
+# Scrapy logs
+scrapy.log
+
 # Config files (IMPORTANT: config.ini contains sensitive data!)
 config.ini
 
 # Virtual environment (Poetry)
 .venv/
-poetry.lock
+

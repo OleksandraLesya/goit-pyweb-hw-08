@@ -1,132 +1,174 @@
+import logging
 import sys
 import json
-import logging # Import the logging module
-from typing import List, Dict, Any, Optional # Import types for annotations
-import re # Import regex for pattern matching
+from concurrent.futures import ThreadPoolExecutor
+import re
 
-from models import Author, Quote # Import models
-from connect import connect_db # Import the function for connecting to the DB
-from cache import get_cache, set_cache # Import caching functions
 
-# Configure logging for this module
+from run_scraper import run_scrapy_spider
+
+from connect import connect_db
+from cache import r as redis_client, get_cache, set_cache
+from models import Author, Quote
+from mongoengine import Q
+
+# Налаштування логування для main.py
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def search_quotes_cli() -> None:
-    """
-    Function to run the CLI application for searching quotes with Redis caching support.
-    Allows searching quotes by author name, single tag, or multiple tags.
-    Added support for shortened search values using regular expressions.
-    """
-    # 1. Connect to the MongoDB Atlas database
-    # The connect_db() function already outputs a message about successful connection or error.
-    connect_db()
 
-    logging.info("\nПідключено до бази даних. Введіть команду для пошуку (наприклад, 'name: Albert Einstein', 'tag: life', 'tags: humor,funny') або 'exit' для виходу.")
+# Функція для пошуку цитат за ім'ям автора
+def search_quotes_by_author(author_name):
+    """
+    Шукає цитати за повним або частковим ім'ям автора.
+    Використовує Redis для кешування результатів.
+    """
+    cache_key = f"author:{author_name.lower()}"
+    cached_result = get_cache(cache_key)
+
+    if cached_result:
+        logging.info(">>> From Redis:")
+        quotes_data = cached_result
+        for quote_data in quotes_data:
+            logging.info(
+                f"- \"{quote_data['quote']}\" - {quote_data['author']} (Теги: {', '.join(quote_data['tags'])})")
+        return
+
+    logging.info(">>> From MongoDB:")
+
+    # ВИПРАВЛЕНО: Спочатку знаходимо авторів за іменем
+    # Використовуємо iregex для пошуку за частковим ім'ям без урахування регістру
+    authors = Author.objects(fullname__iregex=f"^{re.escape(author_name)}").all()
+
+    if not authors:
+        logging.info("Автора з таким ім'ям не знайдено.")
+        return
+
+    # Збираємо ID знайдених авторів
+    author_ids = [author.id for author in authors]
+
+    # Тепер шукаємо цитати, які посилаються на цих авторів за їхніми ID
+    quotes = Quote.objects(author__in=author_ids).all()
+
+    if quotes:
+        quotes_data = []
+        for quote in quotes:
+            quotes_data.append({
+                "quote": quote.quote,
+                "author": quote.author.fullname,
+                "tags": [tag for tag in quote.tags]
+            })
+        set_cache(cache_key, quotes_data, ttl=3600)
+        for quote_data in quotes_data:
+            logging.info(
+                f"- \"{quote_data['quote']}\" - {quote_data['author']} (Теги: {', '.join(quote_data['tags'])})")
+    else:
+        logging.info("Цитат за цим автором не знайдено.")
+
+
+# Функція для пошуку цитат за тегом
+def search_quotes_by_tag(tag_name):
+    """
+    Шукає цитати за повним або частковим тегом.
+    Використовує Redis для кешування результатів.
+    """
+    cache_key = f"tag:{tag_name.lower()}"
+    cached_result = get_cache(cache_key)
+
+    if cached_result:
+        logging.info(">>> From Redis:")
+        quotes_data = cached_result
+        for quote_data in quotes_data:
+            logging.info(
+                f"- \"{quote_data['quote']}\" - {quote_data['author']} (Теги: {', '.join(quote_data['tags'])})")
+        return
+
+    logging.info(">>> From MongoDB:")
+    quotes = Quote.objects(tags__iregex=f"^{re.escape(tag_name)}").all()
+    if quotes:
+        quotes_data = []
+        for quote in quotes:
+            quotes_data.append({
+                "quote": quote.quote,
+                "author": quote.author.fullname,
+                "tags": [tag for tag in quote.tags]
+            })
+        set_cache(cache_key, quotes_data, ttl=3600)
+        for quote_data in quotes_data:
+            logging.info(
+                f"- \"{quote_data['quote']}\" - {quote_data['author']} (Теги: {', '.join(quote_data['tags'])})")
+    else:
+        logging.info("Цитат за цим тегом не знайдено.")
+
+
+# Функція для пошуку цитат за кількома тегами
+def search_quotes_by_tags(tag_names):
+    """
+    Шукає цитати за кількома тегами (логічне АБО).
+    Не кешується в Redis.
+    """
+    logging.info(">>> From MongoDB (множинні теги не кешуються):")
+    tags_query = [Q(tags__in=[tag.strip()]) for tag in tag_names]
+    combined_query = Q()
+    for q_obj in tags_query:
+        combined_query |= q_obj
+
+    quotes = Quote.objects(combined_query).all()
+
+    if quotes:
+        for quote in quotes:
+            logging.info(
+                f"- \"{quote.quote}\" - {quote.author.fullname} (Теги: {', '.join(tag for tag in quote.tags)})")
+    else:
+        logging.info("Цитат за вказаними тегами не знайдено.")
+
+
+# Головна функція CLI-додатку
+def run_cli_app():
+    """
+    Запускає інтерактивний CLI-додаток для пошуку цитат.
+    """
+    logging.info(
+        "\nПідключено до бази даних. Введіть команду для пошуку (наприклад, 'name: Albert Einstein', 'tag: life', 'tags: humor,funny') або 'exit' для виходу.")
     logging.info("Результати з кешу Redis будуть позначені '>>> From Redis:', з MongoDB - '>>> From MongoDB:'.")
     logging.info("Тепер також підтримується скорочений пошук, наприклад, 'name: al' або 'tag: li'.")
 
     while True:
-        user_input: str = input(">>> ").strip() # Get user input
-        if user_input.lower() == 'exit':
+        command = input(">>> ").strip()
+        if command.lower() == 'exit':
             logging.info("Вихід з програми.")
-            break # Exit the loop if the user entered 'exit'
-
-        if ":" not in user_input:
-            logging.warning("Некоректний формат. Використовуйте 'name: [ім'я]', 'tag: [тег]', 'tags: [тег1],[тег2]' або 'exit'.")
-            continue
-
-        key: str
-        value: str
-        try:
-            key, value = user_input.split(":", 1)
-        except ValueError:
-            logging.warning("Некоректний формат команди. Будь ласка, використовуйте 'команда: значення'.")
-            continue
-
-        key = key.strip().lower() # Convert key to lowercase for convenience
-        value = value.strip()
-
-        if not value:
-            logging.warning(f"Будь ласка, вкажіть значення для '{key}'.")
-            continue
-
-        # Form the key for Redis cache
-        cache_key: str = f"{key}:{value}"
-
-        # 1. Try to get data from Redis cache
-        cached_result: Optional[List[Dict[str, Any]]] = get_cache(cache_key)
-        if cached_result:
-            logging.info("\n>>> From Redis:")
-            # Output cached results
-            for item in cached_result:
-                logging.info(f"- \"{item['quote']}\" - {item['author']} (Теги: {', '.join(item['tags'])})")
-            continue # Go to the next loop iteration if data is found in cache
-
-        # 2. If no data in cache, search in MongoDB
-        logging.info("\n>>> From MongoDB:")
-        quotes_from_db: List[Dict[str, Any]] = [] # List to store results from DB
-
-        if key == "name":
-            # Use __iregex for case-insensitive search by part of the name (starts with)
-            # The regex pattern is now more robust to ensure it matches the beginning of the string
-            authors = Author.objects(fullname__iregex=f"^{re.escape(value)}")
-            if authors:
-                for author in authors:
-                    quotes = Quote.objects(author=author)
-                    if quotes:
-                        for q in quotes:
-                            quotes_from_db.append({
-                                "quote": q.quote,
-                                "author": q.author.fullname,
-                                "tags": q.tags
-                            })
-            if not quotes_from_db: # If nothing was found after iterating through authors
-                logging.info(f"Цитат від автора, ім'я якого починається з '{value}', не знайдено.")
-
-
-        elif key == "tag":
-            # Use __iregex for case-insensitive search by part of the tag (starts with)
-            quotes = Quote.objects(tags__iregex=f"^{re.escape(value)}")
-            if quotes:
-                for q in quotes:
-                    quotes_from_db.append({
-                        "quote": q.quote,
-                        "author": q.author.fullname,
-                        "tags": q.tags
-                    })
-            else:
-                logging.info(f"Цитат з тегом, що починається з '{value}', не знайдено.")
-
-        elif key == "tags":
-            tags_list: List[str] = [t.strip() for t in value.split(',') if t.strip()]
-            if not tags_list:
-                logging.warning("Будь ласка, вкажіть дійсні теги.")
-                continue
-            # Use __all for searching quotes that contain ALL specified tags
-            quotes = Quote.objects(tags__all=tags_list)
-            if quotes:
-                for q in quotes:
-                    quotes_from_db.append({
-                        "quote": q.quote,
-                        "author": q.author.fullname,
-                        "tags": q.tags
-                    })
-            else:
-                logging.info(f"Цитат з тегами '{', '.join(tags_list)}' не знайдено.")
+            break
+        elif command.lower().startswith('name:'):
+            author_name = command[len('name:'):].strip()
+            search_quotes_by_author(author_name)
+        elif command.lower().startswith('tag:'):
+            tag_name = command[len('tag:'):].strip()
+            search_quotes_by_tag(tag_name)
+        elif command.lower().startswith('tags:'):
+            tag_names_str = command[len('tags:'):].strip()
+            tag_names = [t.strip() for t in tag_names_str.split(',')]
+            search_quotes_by_tags(tag_names)
         else:
-            logging.warning("Невідома команда.")
-            continue # Go to the next loop iteration
-
-        # 3. If data was found in MongoDB, save it to Redis cache
-        if quotes_from_db:
-            set_cache(cache_key, quotes_from_db) # Save list of dictionaries
-            # Output results obtained from MongoDB
-            for item in quotes_from_db:
-                logging.info(f"- \"{item['quote']}\" - {item['author']} (Теги: {', '.join(item['tags'])})")
-        elif not cached_result: # If nothing was in cache and nothing found in DB
-            logging.info("Нічого не знайдено за вашим запитом.")
+            logging.info(
+                "Невідома команда. Будь ласка, використовуйте 'name: <автор>', 'tag: <тег>', 'tags: <тег1,тег2>' або 'exit'.")
 
 
-# Run the CLI application if the script is run directly
-if __name__ == "__main__":
-    search_quotes_cli()
+# Головна точка входу в програму
+if __name__ == '__main__':
+    connect_db()
+
+    print("\nОберіть дію:")
+    print("1. Запустити Scrapy (збір даних)")
+    print("2. Запустити CLI-додаток (пошук цитат)")
+    print("3. Вийти")
+
+    choice = input("Ваш вибір (1, 2 або 3): ").strip()
+
+    if choice == '1':
+        run_scrapy_spider()
+    elif choice == '2':
+        run_cli_app()
+    elif choice == '3':
+        logging.info("Вихід з програми.")
+        sys.exit(0)
+    else:
+        logging.info("Некоректний вибір. Будь ласка, перезапустіть програму та оберіть 1, 2 або 3.")
